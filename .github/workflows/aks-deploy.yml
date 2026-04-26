@@ -1,44 +1,63 @@
-name: Deploy to AKS
+name: Deploy Java App to AKS
 
 on:
   push:
     branches: [ "main" ]
 
+env:
+  IMAGE_NAME: java-app
+
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
 
-    - uses: actions/setup-java@v3
+    # 1. Checkout code
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. Setup Java
+    - name: Setup Java
+      uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Build app
+    # 3. Build JAR
+    - name: Build application
       run: mvn clean package -DskipTests
 
-    - name: Azure login
+    # 4. Azure Login (NEW METHOD)
+    - name: Azure Login
       uses: azure/login@v1
       with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    # 5. Login to ACR
     - name: Login to ACR
       run: az acr login --name ${{ secrets.ACR_NAME }}
 
-    - name: Build Docker image
-      run: docker build -t ${{ secrets.ACR_NAME }}.azurecr.io/java-app:${{ github.sha }} .
+    # 6. Build Docker Image
+    - name: Build Docker Image
+      run: |
+        docker build -t ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }} .
 
-    - name: Push image
-      run: docker push ${{ secrets.ACR_NAME }}.azurecr.io/java-app:${{ github.sha }}
+    # 7. Push Docker Image
+    - name: Push Docker Image
+      run: |
+        docker push ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-    - name: Get AKS credentials
-      run: az aks get-credentials --resource-group ${{ secrets.RESOURCE_GROUP }} --name ${{ secrets.AKS_CLUSTER_NAME }}
+    # 8. Get AKS Credentials
+    - name: Get AKS Credentials
+      run: |
+        az aks get-credentials \
+          --resource-group ${{ secrets.RESOURCE_GROUP }} \
+          --name ${{ secrets.AKS_CLUSTER_NAME }}
 
+    # 9. Deploy to AKS
     - name: Deploy to AKS
       run: |
         kubectl apply -f k8s/
-        kubectl set image deployment/java-app java-app=${{ secrets.ACR_NAME }}.azurecr.io/java-app:${{ github.sha }}
+        kubectl set image deployment/java-app \
+        java-app=${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
